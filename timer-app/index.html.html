@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tap-to-Add Timer (+5min)</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --card:#121823; --fg:#eaf2ff; --muted:#9fb3c8; --accent:#4cc9f0; --accent2:#80ffdb;
+    }
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans JP";background:linear-gradient(180deg,#0b0f14 0%,#0a1220 100%);color:var(--fg);display:grid;place-items:center}
+    .app{width:min(920px,94vw);padding:20px}
+    .card{background:var(--card);border:1px solid #1b2432;border-radius:20px;box-shadow:0 10px 30px rgba(0,0,0,.35);padding:18px}
+    .header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .title{font-weight:700;letter-spacing:.3px}
+    .clock{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px 10px 6px}
+    .time{font-variant-numeric:tabular-nums;font-weight:800;line-height:1;font-size:clamp(56px,16vw,128px)}
+    .millis{font-variant-numeric:tabular-nums;font-size:clamp(14px,3.5vw,18px);color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+    .btn{appearance:none;border:none;border-radius:16px;padding:16px 14px;font-weight:700;font-size:clamp(16px,3.6vw,18px);color:#071018;cursor:pointer;transition:transform .05s ease,filter .15s ease}
+    .btn:active{transform:translateY(1px)}
+    .add{background:linear-gradient(180deg,var(--accent2),var(--accent))}
+    .ghost{background:#18212f;color:var(--fg);border:1px solid #233047}
+    .danger{background:linear-gradient(180deg,#ff9aa2,#ff6b6b)}
+    .ok{background:linear-gradient(180deg,#b2ff9e,#68d391)}
+    .row{display:flex;gap:10px;margin-top:10px}
+    .row .btn{flex:1}
+    .controls{margin-top:8px;display:flex;gap:14px;align-items:center;color:var(--muted);font-size:14px}
+    .chip{background:#162132;color:var(--muted);padding:8px 10px;border-radius:999px;border:1px solid #22324b}
+    .footer{margin-top:12px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;align-items:center}
+    .bigAdd{display:block;width:100%;margin-top:14px;font-size:clamp(22px,6vw,28px);padding:20px 18px}
+    .norma{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 0}
+    .pill{background:#102035;color:var(--fg);border:1px solid #22324b;padding:6px 10px;border-radius:999px;font-size:13px}
+    #status{
+      font-size:clamp(32px,8vw,64px);
+      font-weight:900;
+      color:#ff4d6d;
+      text-shadow:0 0 20px rgba(255,77,109,0.8),0 0 40px rgba(255,77,109,0.5);
+      animation:pulse 1.2s infinite;
+    }
+    @keyframes pulse{
+      0%,100%{transform:scale(1);opacity:1;}
+      50%{transform:scale(1.1);opacity:0.8;}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <div class="header">
+        <div class="title">Tap-to-Add Timer</div>
+        <div class="chip" id="status">停止中</div>
+      </div>
+
+      <div class="clock">
+        <div class="time" id="time">00:00</div>
+        <div class="millis" id="hint">タップで +5分／開始・一時停止：▷︎ / Ⅱ</div>
+      </div>
+      <div class="norma">
+        <span class="pill">総押下: <strong id="pressTotal">0</strong></span>
+        <span class="pill">残りノルマ: <strong id="normaLeft">0</strong></span>
+        <span class="pill" id="fiveTick">5分経過: 0回</span>
+      </div>
+
+      <button class="btn add bigAdd" id="addMain">+5分（メイン）</button>
+
+      <div class="grid" style="margin-top:12px">
+        <button class="btn ghost" data-add="10">+10秒</button>
+        <button class="btn ghost" data-add="60">+1分</button>
+        <button class="btn ghost" data-add="300">+5分</button>
+        <button class="btn ghost" data-add="600">+10分</button>
+      </div>
+
+      <div class="row">
+        <button class="btn ok" id="startPause">▷︎ 開始</button>
+        <button class="btn danger" id="reset">リセット</button>
+      </div>
+
+      <div class="controls">
+        <label><input type="checkbox" id="autoStart" checked> 追加したら自動で開始</label>
+      </div>
+
+      <div class="footer">
+        <span>バイブ/音：終了時に通知</span>
+        <div>
+          <button class="btn ghost" id="testBeep" style="padding:10px 12px; font-size:13px">通知テスト</button>
+          <button class="btn danger" id="stopAlarm" style="padding:10px 12px; font-size:13px">アラーム停止</button>
+        </div>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ====== State ======
+    let remaining = 0;
+    let timerId = null;
+    let lastTick = 0;
+    let elapsedTotal = 0;
+    let fiveTicksDone = 0;
+    let pressTotal = 0;
+    let normaLeft = 0;
+
+    const elTime = document.getElementById('time');
+    const elStatus = document.getElementById('status');
+    const btnStartPause = document.getElementById('startPause');
+    const btnReset = document.getElementById('reset');
+    const elAuto = document.getElementById('autoStart');
+    const addMain = document.getElementById('addMain');
+    const elPressTotal = document.getElementById('pressTotal');
+    const elNormaLeft = document.getElementById('normaLeft');
+    const elFiveTick = document.getElementById('fiveTick');
+
+    function fmt(sec){
+      sec = Math.max(0, Math.floor(sec));
+      const m = Math.floor(sec/60); const s = sec%60;
+      const h = Math.floor(m/60); const mm = m%60;
+      return (h>0? String(h).padStart(2,'0')+':' : '') + String(mm).padStart(2,'0')+':'+String(s).padStart(2,'0');
+    }
+
+    function render(){
+      elTime.textContent = fmt(remaining);
+      elStatus.textContent = timerId ? '掃除しろ！！' : '停止中';
+      btnStartPause.textContent = timerId ? 'Ⅱ 一時停止' : '▷︎ 開始';
+      elPressTotal.textContent = pressTotal;
+      elNormaLeft.textContent = Math.max(0, normaLeft);
+      elFiveTick.textContent = `5分経過: ${fiveTicksDone}回`;
+      document.title = (remaining>0? '['+fmt(remaining)+'] ' : '') + 'Tap-to-Add Timer';
+    }
+
+    function start(){
+      if(timerId) return;
+      lastTick = performance.now();
+      timerId = setInterval(()=>{
+        const now = performance.now();
+        const delta = (now - lastTick)/1000;
+        lastTick = now;
+        tick(delta);
+      },200);
+      render();
+    }
+
+    function pause(){ if(!timerId) return; clearInterval(timerId); timerId=null; render(); }
+    function reset(){ pause(); remaining=0; elapsedTotal=0; fiveTicksDone=0; normaLeft=0; Alarm.stop(); render(); }
+
+    function addSeconds(sec, auto = elAuto?.checked){
+      remaining += sec; if(remaining < 0) remaining = 0;
+      pressTotal += 1;
+      normaLeft += 1;
+      render();
+      if(auto && remaining>0 && !timerId) start();
+    }
+
+    function tick(delta){
+      if(!(delta>0)) return;
+      remaining -= delta; if(remaining <= 0){ remaining=0; pause(); onFinish(); return; }
+      elapsedTotal += delta;
+      const cur = Math.floor(elapsedTotal / 300);
+      if(cur > fiveTicksDone){
+        for(let i=0;i<(cur-fiveTicksDone);i++) onFiveMinTick();
+        fiveTicksDone = cur;
+      }
+      render();
+    }
+
+    // ====== Alarm Controller (royalty-free, generated via WebAudio) ======
+    const Alarm = (()=>{
+      const AC = window.AudioContext || window.webkitAudioContext;
+      let ctx = null;
+      let stops = [];   // functions to stop currently playing nodes
+      let endTimer = null;
+
+      function ensure(){ ctx = ctx || (AC ? new AC() : null); return ctx; }
+
+      // Upbeat chiptune-like sequence, constant volume (no global fade-out)
+      function startUpbeat(seconds=15){
+        stop();
+        const c = ensure(); if(!c) return;
+        const t0 = c.currentTime;
+        const gain = c.createGain();
+        gain.gain.setValueAtTime(0.25, t0); // 一定音量（フェードしない）
+        gain.connect(c.destination);
+
+        // Lead (square wave) + Bass (square wave one octave down)
+        const scale = [261.63, 293.66, 329.63, 392.00, 523.25]; // C D E G C'
+        const step = 60/140/2; // 8th at 140 BPM
+        const lead = c.createOscillator(); lead.type = 'square'; lead.connect(gain);
+        const bass = c.createOscillator(); bass.type = 'square'; bass.connect(gain);
+
+        // Simple per-note envelope via gain nodes (keeps overall volume constant feel)
+        const envLead = c.createGain(); envLead.gain.setValueAtTime(1, t0); lead.disconnect(); lead.connect(envLead).connect(gain);
+        const envBass = c.createGain(); envBass.gain.setValueAtTime(0.6, t0); bass.disconnect(); bass.connect(envBass).connect(gain);
+
+        for(let i=0, tt=t0; tt < t0 + seconds; i++, tt += step){
+          const f = scale[i % scale.length];
+          // lead riff (arpeggio up)
+          lead.frequency.setValueAtTime(f, tt);
+          // short pluck envelope (no long fade)
+          envLead.gain.cancelScheduledValues(tt);
+          envLead.gain.setValueAtTime(0.0001, tt);
+          envLead.gain.linearRampToValueAtTime(1.0, tt + 0.02);
+          envLead.gain.linearRampToValueAtTime(0.15, tt + step*0.8);
+
+          // bass hits on downbeats
+          const fb = (i%2===0)? f/2 : f/2;
+          bass.frequency.setValueAtTime(fb, tt);
+          envBass.gain.cancelScheduledValues(tt);
+          envBass.gain.setValueAtTime(0.0001, tt);
+          envBass.gain.linearRampToValueAtTime(0.6, tt + 0.02);
+          envBass.gain.linearRampToValueAtTime(0.1, tt + step*0.9);
+        }
+
+        lead.start(t0); bass.start(t0);
+
+        const stopFn = ()=>{ try{ lead.stop(0); }catch{}; try{ bass.stop(0); }catch{}; try{ gain.disconnect(); }catch{}; };
+        stops.push(stopFn);
+
+        endTimer = setTimeout(()=>{ stop(); }, seconds*1000);
+      }
+
+      function stop(){
+        if(endTimer){ clearTimeout(endTimer); endTimer = null; }
+        while(stops.length){ const s = stops.pop(); try{ s(); }catch{} }
+      }
+
+      return { startUpbeat, stop };
+    })();
+
+    function onFiveMinTick(){
+      if(normaLeft > 0) normaLeft -= 1;
+      Alarm.startUpbeat(15); // 15秒BGM
+      try{ navigator.vibrate && navigator.vibrate([200,100,200,100,200]); }catch(e){}
+    }
+
+    function onFinish(){
+      Alarm.startUpbeat(15);
+      try{ navigator.vibrate && navigator.vibrate([300,120,300]); }catch(e){}
+      // 必要なら alert を残す
+      // alert('時間です！');
+    }
+
+    // ====== Events ======
+    document.querySelectorAll('[data-add]').forEach(btn=>{
+      btn.addEventListener('click', ()=> addSeconds(parseInt(btn.dataset.add,10)) );
+    });
+    addMain.addEventListener('click', ()=> addSeconds(300));
+
+    btnStartPause.addEventListener('click', ()=>{ timerId ? pause() : start(); });
+    btnReset.addEventListener('click', reset);
+
+    document.getElementById('testBeep').addEventListener('click', ()=>{ Alarm.startUpbeat(15); });
+    document.getElementById('stopAlarm').addEventListener('click', ()=>{ Alarm.stop(); });
+
+    render();
+  </script>
+</body>
+</html>
